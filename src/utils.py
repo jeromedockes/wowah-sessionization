@@ -53,14 +53,14 @@ def add_aggregated_features(df):
     )
 
 
-def sample_by_user(df):
+def sample_by_user(df, fraction=0.1):
     '''
-    Sample 10% of users (chars) and return all their data.
+    Sample a fraction of users (chars) and return all their data.
     '''
     data = df.filter(
         pl.col("char").is_in(
             df.select(pl.col("char").unique())
-            .sample(fraction=0.1, seed=42)["char"]
+            .sample(fraction=fraction, seed=42)["char"]
             .implode()
         )
     )

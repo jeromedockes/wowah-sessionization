@@ -33,7 +33,7 @@ MIN_DATE = datetime.strptime("2008-02-01", "%Y-%m-%d")
 # I had to set the max date to november because otherwise I was getting
 # ValueError: No valid specification of the columns.
 # This is again because we are predicting on month N for month N+1
-MAX_DATE = datetime.strptime("2008-05-30", "%Y-%m-%d")
+MAX_DATE = datetime.strptime("2008-11-30", "%Y-%m-%d")
 # Actual ranges for the full dataset
 # MIN_DATE = datetime.strptime("2005-12-31", "%Y-%m-%d")
 # MAX_DATE = datetime.strptime("2009-01-10", "%Y-%m-%d")
@@ -69,24 +69,34 @@ class Splitter:
 # This function is needed to make sure that we are only ever using historical data
 # up to the given month - 1 month. This is to avoid any leakage in the data.
 @skrub.deferred
-def filter_past(X, historical_data):
-    assert X["month"].n_unique() == 1
-    assert X["char"].n_unique() == X.shape[0]
-    historical_data = historical_data.with_columns(
-        month=pl.col("timestamp").dt.truncate("1mo")
-    )
+def add_features(X, historical_data):
 
-    return historical_data.filter(
-        pl.col("month") < (X["month"][0] - timedelta(days=30))
-    )
-
+    features_by_month = []
+    print("New split, filtering historical data...") 
+    for month in X["month"].unique():
+        print(f"Filtering historical data for month {month}")
+        # I need to truncate the timestamp to month to be able to compare it with the month
+        kept_historical_data = historical_data.with_columns(
+            month=pl.col("timestamp").dt.truncate("1mo")
+        ).filter(pl.col("month") < month)
+        
+        # add_features
+        # features = add_features(kept_historical_data, month)
+        features = pl.DataFrame({"month": [month]})
+        features_by_month.append(features)
+        
+    # all_features = X
+    # for features in features_by_month:
+    #     all_features = all_features.join(features, on=["char", "month"], how="left")
+    return X  
+    # return all_features
 
 @skrub.deferred
 def load(file):
     return pl.read_parquet(file)
 
 
-def add_features(X, historical_data):
+def add_features_old(X, historical_data):
     timestamp_encoder = ApplyToCols(
         DatetimeEncoder(periodic_encoding="circular"),
         keep_original=True,
@@ -126,11 +136,10 @@ def make_data_op():
     y = user_month_has_played["has_played"].skb.mark_as_y()
     historical_data_file = skrub.var("historical_data_file")
     historical_data = load(historical_data_file)
-    kept_historical_data = filter_past(X, historical_data)
-    historical_data_with_sessions = apply_session_encoder(kept_historical_data)
-    features = add_features(X, historical_data_with_sessions)
+    all_features = add_features(X, historical_data)
+    # historical_data_with_sessions = apply_session_encoder(kept_historical_data)
     # data_op = features.skb.apply(HGB(), y=y)
-    data_op = features.skb.apply(DummyClassifier(), y=y)
+    data_op = all_features.skb.apply(DummyClassifier(), y=y)
     return data_op
 
 
@@ -155,9 +164,11 @@ def evaluate():
 # %%
 
 df = pl.read_parquet("data/wowah_churn_data.parquet")
+df = sample_by_user(df, fraction=0.1)
 data_op = make_data_op()
 # %%
 results = cross_validate()
 # %%
 evaluation_results = evaluate()
 # %%
+print(results)
